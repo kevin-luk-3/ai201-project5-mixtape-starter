@@ -77,4 +77,29 @@ A similar pattern exists for rating (`POST /songs/<id>/rate` → `rate_song()`),
 
 ## Root Cause Analyses
 
-<!-- One section per fixed bug — all 5 fields each -->
+### Issue #5: The last song in a playlist never shows up
+
+**How I reproduced it**
+
+1. Ran `python seed_data.py` and started the app with `flask --app app:create_app run`.
+2. Looked up the playlist ID for "Late Night Vibes" in the database (seeded with `all_songs[:7]` in `seed_data.py`, so 7 songs are stored in `playlist_entries`).
+3. Called `GET /playlists/<playlist_id>/songs`.
+4. The response returned `"count": 6` every time, regardless of how many songs were actually in the playlist. The missing song was always the last one by position (e.g. "Free Throws" for Late Night Vibes).
+
+**How I found the root cause**
+
+1. README maps Issue #5 to `playlist_service.py`.
+2. Opened `routes/playlists.py` → `get_songs()` calls `get_playlist_songs(playlist_id)` and returns the list with `len(songs)` as count.
+3. Opened `get_playlist_songs()` in `services/playlist_service.py`. The SQLAlchemy query (join on `playlist_entries`, filter by playlist, order by `position` ASC) looked correct.
+4. The bug was on the return line: `return [song.to_dict() for song in songs[:-1]]`. The `[:-1]` slice drops the final element of every result set. I confirmed in flask shell that `len(p.songs)` was 7 while the API returned 6.
+
+**Root cause**
+
+`get_playlist_songs()` fetched all songs in the correct order but returned `songs[:-1]` instead of `songs`. In Python, `[:-1]` excludes the last item in a list. So a playlist with N songs always returned N−1 — specifically, the song at the highest `position` value was silently dropped. The query and join table were fine; the data was lost in the return statement.
+
+**Fix and side-effect check**
+
+- **Fix:** Changed the return to `return [song.to_dict() for song in songs]` (removed `[:-1]`).
+- **Verify:** Re-ran `GET /playlists/<id>/songs` for "Late Night Vibes" → `"count": 7`, all seven seeded titles present including "Free Throws" (last position).
+- **Side effects:** Confirmed `GET /playlists/<id>` (metadata only, uses `get_playlist()`) still works. Checked that other seeded playlists ("Friday Energy", "Study Mode") return their full song counts. Had to kill duplicate Flask processes on port 5000 so the restarted server actually loaded the updated code.
+
