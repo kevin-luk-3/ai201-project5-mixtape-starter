@@ -29,3 +29,8 @@ build/
 # Editor
 .vscode/
 .idea/
+rubric.md
+route-flow.html
+planning.md
+instructions.md
+bug-walkthrough.html
