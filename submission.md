@@ -1,6 +1,30 @@
 # Mixtape — Project 5 Submission
 
-<!-- AI Usage section goes here at the end (Milestone 4) -->
+## AI Usage
+
+I used Cursor (AI-assisted IDE) throughout this project. Below is what it actually helped with and where I still had to verify things myself.
+
+**Use 1 — Building the codebase map**
+
+I asked the AI to walk through how the app is organized: which files own which features, and how a request flows from a route into a service. It pointed me to `routes/playlists.py` → `playlist_service.get_playlist_songs()` as the path for playlist songs, and `notification_service.add_to_playlist()` as the working notification example. That gave me a starting map, but I read each file myself and edited the map so it described the starter code, not the fixed code.
+
+**Use 2 — Tracing bugs from endpoint to root cause**
+
+For Issue #5, I described the symptom (playlist always missing the last song) and the AI suggested following the README’s service mapping into `get_playlist_songs()`. It highlighted the `songs[:-1]` slice on the return line. I did not take that at face value — I ran `flask shell`, loaded the "Late Night Vibes" playlist, and confirmed `len(p.songs)` was 7 while `GET /playlists/<id>/songs` returned `count: 6`. That proved the query was fine and the slice was dropping the last row.
+
+For Issue #4, the AI compared `rate_song()` to `add_to_playlist()` in the same file and noticed only the playlist path called `create_notification()`. I verified by rating simone’s song as darius and checking simone’s notifications before and after — rating saved, notification did not, until I added the missing call.
+
+For Issue #2, the AI traced `GET /feed/.../listening-now` to `RECENT_THRESHOLD` in `feed_service.py`. I confirmed the seed data had listens hours old still showing up, then re-tested after changing the window to 30 minutes.
+
+**Where I course-corrected**
+
+Early on the AI floated Issue #3 (search duplicates) and suggested reproducing with `?q=rap`. I checked `search_service.py` and saw search only matches title/artist, not tags — so that repro did not match the real bug. I skipped #3 and fixed #2, #4, and #5 instead.
+
+I also had to restart Flask and kill duplicate processes on port 5000 before fixes showed up in curl. The AI reminded me of that, but I confirmed it myself when the API kept returning old behavior after a code change.
+
+**What I did not outsource**
+
+I ran all repro steps (`curl`, `flask shell`, `seed_data.py`), wrote the RCA text in my own words from what I observed, and split fixes into separate commits on `bugfix/mixtape` so the git log matches one fix per commit.
 
 ---
 
@@ -130,4 +154,30 @@ A similar pattern exists for rating (`POST /songs/<id>/rate` → `rate_song()`),
 - **Fix:** After `db.session.commit()` in `rate_song()`, added the same pattern as `add_to_playlist()`: if `song.shared_by != user_id`, call `create_notification()` with type `song_rated` and a message naming the rater, song title, and score.
 - **Verify:** Restarted Flask, repeated the rate POST, then `GET /users/<simone_id>/notifications` → new `song_rated` notification appears.
 - **Side effects:** Self-rating (sharer rates own song) should not notify — guarded by `song.shared_by != user_id`. Existing playlist-add notifications unchanged. Rating create/update logic unchanged.
+
+### Issue #2: Friends Listening Now shows stale listeners
+
+**How I reproduced it**
+
+1. README maps Issue #2 to `feed_service.py`. Seed data comments say recent events are ~10–20 minutes old and older events start at 2+ hours ago.
+2. Used `flask shell` to get nova's user id (nova is friends with darius, simone, and kenji per `seed_data.py`).
+3. `GET /feed/<nova_id>/listening-now` returned friends with `listened_at` timestamps hours in the past (e.g. kenji ~3 hours ago), not people listening right now.
+4. The filter logic (`listened_at >= cutoff`) was passing those events because the cutoff window was 24 hours wide.
+
+**How I found the root cause**
+
+1. Traced `GET /feed/<user_id>/listening-now` → `routes/feed.py` → `get_friends_listening_now()`.
+2. Found `RECENT_THRESHOLD = timedelta(hours=24)` at the top of `feed_service.py`.
+3. `cutoff = now - RECENT_THRESHOLD` means any listen in the last 24 hours qualifies — including yesterday evening.
+4. The query and dedup logic were correct; the threshold constant was wrong for a feature named "Listening Now". Compared to `get_activity_feed()` which intentionally has no recency filter — confirming this function was meant to be stricter.
+
+**Root cause**
+
+`RECENT_THRESHOLD` was set to 24 hours, so `get_friends_listening_now()` treated any friend who listened in the past day as "listening now." The filter comparison (`listened_at >= cutoff`) worked as written, but the cutoff was far too loose for the product intent. Friends who listened hours ago still appeared in the feed.
+
+**Fix and side-effect check**
+
+- **Fix:** Changed `RECENT_THRESHOLD` from `timedelta(hours=24)` to `timedelta(minutes=30)` to match the seed data comment that recent events are within the past 30 minutes.
+- **Verify:** Restarted Flask, re-ran `GET /feed/<nova_id>/listening-now` — stale hours-old entries dropped off. After `POST /songs/<id>/listen` for a friend, that friend reappears with a fresh `listened_at`.
+- **Side effects:** `GET /feed/<user_id>/activity` uses `get_activity_feed()` which has no recency filter — still returns older events. Unchanged by this fix.
 
