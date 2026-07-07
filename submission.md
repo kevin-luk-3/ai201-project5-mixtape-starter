@@ -1,31 +1,5 @@
 # Mixtape — Project 5 Submission
 
-## AI Usage
-
-I used Cursor (AI-assisted IDE) throughout this project. Below is what it actually helped with and where I still had to verify things myself.
-
-**Use 1 — Building the codebase map**
-
-I asked the AI to walk through how the app is organized: which files own which features, and how a request flows from a route into a service. It pointed me to `routes/playlists.py` → `playlist_service.get_playlist_songs()` as the path for playlist songs, and `notification_service.add_to_playlist()` as the working notification example. That gave me a starting map, but I read each file myself and edited the map so it described the starter code, not the fixed code.
-
-**Use 2 — Tracing bugs from endpoint to root cause**
-
-For Issue #5, I described the symptom (playlist always missing the last song) and the AI suggested following the README’s service mapping into `get_playlist_songs()`. It highlighted the `songs[:-1]` slice on the return line. I did not take that at face value — I ran `flask shell`, loaded the "Late Night Vibes" playlist, and confirmed `len(p.songs)` was 7 while `GET /playlists/<id>/songs` returned `count: 6`. That proved the query was fine and the slice was dropping the last row.
-
-For Issue #4, the AI compared `rate_song()` to `add_to_playlist()` in the same file and noticed only the playlist path called `create_notification()`. I verified by rating simone’s song as darius and checking simone’s notifications before and after — rating saved, notification did not, until I added the missing call.
-
-For Issue #2, the AI traced `GET /feed/.../listening-now` to `RECENT_THRESHOLD` in `feed_service.py`. I confirmed the seed data had listens hours old still showing up, then re-tested after changing the window to 30 minutes.
-
-**Where I course-corrected**
-
-Early on the AI floated Issue #3 (search duplicates) and suggested reproducing with `?q=rap`. I checked `search_service.py` and saw search only matches title/artist, not tags — so that repro did not match the real bug. I skipped #3 and fixed #2, #4, and #5 instead.
-
-I also had to restart Flask and kill duplicate processes on port 5000 before fixes showed up in curl. The AI reminded me of that, but I confirmed it myself when the API kept returning old behavior after a code change.
-
-**What I did not outsource**
-
-I ran all repro steps (`curl`, `flask shell`, `seed_data.py`), wrote the RCA text in my own words from what I observed, and split fixes into separate commits on `bugfix/mixtape` so the git log matches one fix per commit.
-
 ---
 
 ## Codebase Map
@@ -180,4 +154,32 @@ A similar pattern exists for rating (`POST /songs/<id>/rate` → `rate_song()`),
 - **Fix:** Changed `RECENT_THRESHOLD` from `timedelta(hours=24)` to `timedelta(minutes=30)` to match the seed data comment that recent events are within the past 30 minutes.
 - **Verify:** Restarted Flask, re-ran `GET /feed/<nova_id>/listening-now` — stale hours-old entries dropped off. After `POST /songs/<id>/listen` for a friend, that friend reappears with a fresh `listened_at`.
 - **Side effects:** `GET /feed/<user_id>/activity` uses `get_activity_feed()` which has no recency filter — still returns older events. Unchanged by this fix.
+
+---
+
+## AI Usage
+
+I used Cursor (AI-assisted IDE) throughout this project. Below is what it actually helped with and where I still had to verify things myself.
+
+**Use 1 — Building the codebase map**
+
+I asked the AI to walk through how the app is organized: which files own which features, and how a request flows from a route into a service. It pointed me to `routes/playlists.py` → `playlist_service.get_playlist_songs()` as the path for playlist songs, and `notification_service.add_to_playlist()` as the working notification example. That gave me a starting map, but I read each file myself and edited the map so it described the starter code, not the fixed code.
+
+**Use 2 — Tracing bugs from endpoint to root cause**
+
+For Issue #5, I described the symptom (playlist always missing the last song) and the AI suggested following the README’s service mapping into `get_playlist_songs()`. It highlighted the `songs[:-1]` slice on the return line. I did not take that at face value — I ran `flask shell`, loaded the "Late Night Vibes" playlist, and confirmed `len(p.songs)` was 7 while `GET /playlists/<id>/songs` returned `count: 6`. That proved the query was fine and the slice was dropping the last row.
+
+For Issue #4, the AI compared `rate_song()` to `add_to_playlist()` in the same file and noticed only the playlist path called `create_notification()`. I verified by rating simone’s song as darius and checking simone’s notifications before and after — rating saved, notification did not, until I added the missing call.
+
+For Issue #2, the AI traced `GET /feed/.../listening-now` to `RECENT_THRESHOLD` in `feed_service.py`. I confirmed the seed data had listens hours old still showing up, then re-tested after changing the window to 30 minutes.
+
+**Where I course-corrected**
+
+Early on the AI floated Issue #3 (search duplicates) and suggested reproducing with `?q=rap`. I checked `search_service.py` and saw search only matches title/artist, not tags — so that repro did not match the real bug. I skipped #3 and fixed #2, #4, and #5 instead.
+
+I also had to restart Flask and kill duplicate processes on port 5000 before fixes showed up in curl. The AI reminded me of that, but I confirmed it myself when the API kept returning old behavior after a code change.
+
+**What I did not outsource**
+
+I ran all repro steps (`curl`, `flask shell`, `seed_data.py`), wrote the RCA text in my own words from what I observed, and split fixes into separate commits on `bugfix/mixtape` so the git log matches one fix per commit.
 
