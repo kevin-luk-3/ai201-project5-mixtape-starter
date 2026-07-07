@@ -103,3 +103,31 @@ A similar pattern exists for rating (`POST /songs/<id>/rate` → `rate_song()`),
 - **Verify:** Re-ran `GET /playlists/<id>/songs` for "Late Night Vibes" → `"count": 7`, all seven seeded titles present including "Free Throws" (last position).
 - **Side effects:** Confirmed `GET /playlists/<id>` (metadata only, uses `get_playlist()`) still works. Checked that other seeded playlists ("Friday Energy", "Study Mode") return their full song counts. Had to kill duplicate Flask processes on port 5000 so the restarted server actually loaded the updated code.
 
+### Issue #4: No notification when a friend rates your song
+
+**How I reproduced it**
+
+1. Read `seed_data.py` — simone (`users[2]`) shared "Crown Heights Anthem"; darius is a different user.
+2. Used `flask shell` to get IDs for simone, darius, and the song.
+3. `GET /users/<simone_id>/notifications` → `"count": 0` (no `song_rated` notification).
+4. `POST /songs/<song_id>/rate` with body `{"user_id": "<darius_id>", "score": 5}` → returned `201` and saved the rating successfully.
+5. `GET /users/<simone_id>/notifications` again → still no new notification. Rating worked; notify did not.
+
+**How I found the root cause**
+
+1. README maps Issue #4 to `notification_service.py`. Instructions hint: compare the working notification path to the broken one.
+2. Traced `POST /songs/<id>/rate` → `routes/songs.py` → `rate_song()`.
+3. Read `rate_song()` — it validates, upserts a `Rating`, commits, and returns. No call to `create_notification()`.
+4. Opened `add_to_playlist()` in the same file — after saving the playlist change, it calls `create_notification()` for `song.shared_by` when the adder is not the sharer (lines 64–70).
+5. Confirmed seed data already includes a working `song_added_to_playlist` notification for nova, proving the notification system works — the rating path was simply never wired up.
+
+**Root cause**
+
+`rate_song()` saved the rating correctly but never created a notification for the song's original sharer. This was not a typo in the rating upsert logic (`existing` is a `Rating` object from `.first()`, not a bool — that block is correct). The bug was architectural: `add_to_playlist()` included a `create_notification()` step for `song.shared_by`, but `rate_song()` was implemented without the equivalent step. So when a friend rated someone else's shared song, the `rating` table updated but the `notification` table never got a row.
+
+**Fix and side-effect check**
+
+- **Fix:** After `db.session.commit()` in `rate_song()`, added the same pattern as `add_to_playlist()`: if `song.shared_by != user_id`, call `create_notification()` with type `song_rated` and a message naming the rater, song title, and score.
+- **Verify:** Restarted Flask, repeated the rate POST, then `GET /users/<simone_id>/notifications` → new `song_rated` notification appears.
+- **Side effects:** Self-rating (sharer rates own song) should not notify — guarded by `song.shared_by != user_id`. Existing playlist-add notifications unchanged. Rating create/update logic unchanged.
+
